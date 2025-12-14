@@ -1,7 +1,7 @@
 const axios = require("axios");
 let jwt;
-const email = "";
-const password = "";
+const email = "8g1xakp514@zvvzuv.com";
+const password = "Frankreich7";
 async function login() {
     const url = "https://api.satsfaucet.com/auth/login";
     const payload = { email, password};
@@ -25,8 +25,17 @@ async function dailyclaim() {
     console.log(`[DAILY][${response.status === 200 ? "\x1b[32m200\x1b[0m" : "\x1b[31Error\x1b[0m"}/${response.data.success === false ? "\x1b[31mnot ready\x1b[0m" : "\x1b[32mclaimed\x1b[0m"}]`);
 
 }
+
+async function sendverifyemail() {
+    const url = "https://api.satsfaucet.com/app/send-verification-email"
+    const response = await axios.post(url, null, { headers: { 'Authorization': jwt, 'Content-Type': 'application/json' } });
+    console.log(`[VERIFY][${response.status === 200 ? "\x1b[32m200\x1b[0m" : "\x1b[31Error\x1b[0m"}/${response.data.success === false ? "\x1b[31mFailed\x1b[0m" : "\x1b[32mVerified\x1b[0m"}]`);
+}
+
+
 async function start() {
     await login();
+    await sendverifyemail();
     await bounty();
     await dailyclaim(); 
     setInterval(bounty, (60 + 1) * 60 * 1000);
