@@ -1,7 +1,7 @@
 const axios = require("axios");
 let jwt;
-const email = "8g1xakp514@zvvzuv.com";
-const password = "Frankreich7";
+const email = "";
+const password = "";
 async function login() {
     const url = "https://api.satsfaucet.com/auth/login";
     const payload = { email, password};
