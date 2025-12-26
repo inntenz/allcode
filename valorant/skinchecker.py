@@ -89,7 +89,6 @@ def get_lockfile_data():
             return None
         with open(lockfile_path, 'r') as f:
             data = f.read().split(':')
-            log(f"Lockfile data: Process={data[0]}, PID={data[1]}, Port={data[2]}", "DEBUG")
             return {'port': data[2], 'password': data[3]}
     except Exception as e:
         log(f"Failed to read lockfile: {e}", "ERROR")
@@ -106,12 +105,9 @@ def create_local_session(lockfile):
 def get_entitlements_and_token(session, port):
     try:
         url = f"https://127.0.0.1:{port}/entitlements/v1/token"
-        log(f"Requesting tokens from: {url}", "DEBUG")
         response = session.get(url)
-        log(f"Token response status: {response.status_code}", "DEBUG")
         if response.status_code == 200:
             data = response.json()
-            log("Successfully retrieved tokens", "SUCCESS")
             return {'entitlements_token': data['token'], 'access_token': data['accessToken']}
         else:
             log(f"Token response: {response.text}", "ERROR")
@@ -185,8 +181,9 @@ def get_player_data(session, port):
             game_name = data.get("game_name")
             game_tag = data.get("game_tag")
             region = data.get("region", "Unknown")
+
             if game_name and game_tag:
-                print(f"{game_name}#{game_tag} | Region: {region}")
+                log(f"CHECKING USER: {game_name}#{game_tag} | Region: {region}", "INFO")
             elif game_name:
                 print(f"{game_name} | Region: {region}")
             else:
@@ -492,7 +489,7 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
     return canvas
 
 def main():
-    log("Starting Valorant Skins Collection Tool", "INFO")
+    log("Starting Valorant Skins Checker", "INFO")
     lockfile = get_lockfile_data()
     if not lockfile:
         log("Make sure Valorant AND Riot Client are running!", "ERROR")
@@ -501,7 +498,6 @@ def main():
         return
 
     port = lockfile['port']
-    log(f"Using port: {port}", "INFO")
     session = create_local_session(lockfile)
     tokens_data = get_entitlements_and_token(session, port)
     if not tokens_data:
@@ -514,11 +510,9 @@ def main():
         log("Failed to retrieve player UUID", "ERROR")
         return
 
-    # Hole echte Region/Shard und Client Version
-    log("Getting region, shard and client version...", "INFO")
+
     region, shard = get_region_and_shard(session, port)
     client_version = get_client_version(session, port)
-    log(f"Region: {region}, Shard: {shard}, Version: {client_version}", "INFO")
 
     tokens = {
         'entitlements_token': tokens_data['entitlements_token'],
@@ -527,25 +521,19 @@ def main():
     }
 
     # Hole Wallet Daten
-    log("Fetching wallet data...", "INFO")
     wallet = get_wallet(region, shard, tokens, player_uuid)
-    log(f"VP: {wallet.get('VP', 0)} | Radianite: {wallet.get('Radianite', 0)} | KC: {wallet.get('Kingdom Credits', 0)}", "SUCCESS")
-
-    # Hole Rank Daten
-    log("Fetching rank data...", "INFO")
     rank_info = get_player_mmr(region, shard, tokens, player_uuid)
-    log(f"Current Rank: {rank_info['current_rank']} ({rank_info['current_rr']} RR)", "SUCCESS")
 
-    log(f"Fetching owned skins for player {player_uuid[:8]}...", "INFO")
+
     skins = get_owned_skins(region, shard, tokens, player_uuid)
-    log(f"Found {len(skins)} skin entries", "SUCCESS")
+    log(f"{len(skins)} skins w/variants owned", "SUCCESS")
 
     skin_mapping = get_skin_mapping()
 
     skins_data = []
     seen_base_names = set()
 
-    log("Downloading skin images (HD)", "INFO")
+    log("Downloading skins", "INFO")
     for skin in skins:
         info = skin_mapping.get(skin['ItemID'])
         if info:
@@ -564,9 +552,9 @@ def main():
                 'rarity': info.get('rarity')
             })
 
-    log(f"Creating HD grid with {len(skins_data)} unique skins...", "SUCCESS")
+    log(f"Creating Image", "SUCCESS")
     canvas = create_skin_grid(skins_data, wallet, rank_info, player_region)
-    output_path = "valorant_skins_collection_HD.png"
+    output_path = "skins.png"
     canvas.save(output_path, quality=100, optimize=False)
     log(f"Saved to {output_path}", "SUCCESS")
     try:
