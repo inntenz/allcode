@@ -137,7 +137,6 @@ def get_region_and_shard_from_log():
         log_path = os.path.join(os.getenv('LOCALAPPDATA'), r"VALORANT\Saved\Logs\ShooterGame.log")
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-            # Suche nach glz URL Pattern
             match = re.search(r'https://glz-(.+?)-1\.(.+?)\.a\.pvp\.net', content)
             if match:
                 region = match.group(1)
@@ -148,12 +147,10 @@ def get_region_and_shard_from_log():
     return None, None
 
 def get_region_and_shard(session, port):
-    # Versuche zuerst aus dem Log zu lesen
     region, shard = get_region_and_shard_from_log()
     if region and shard:
         return region, shard
     
-    # Fallback: Versuche aus Session
     try:
         url = f"https://127.0.0.1:{port}/product-session/v1/external-sessions"
         response = session.get(url)
@@ -215,7 +212,6 @@ def get_wallet(region, shard, tokens, puuid):
         return {}
 
 def get_player_mmr(region, shard, tokens, puuid):
-    # Nutze competitive updates endpoint
     url = f"https://pd.{shard}.a.pvp.net/mmr/v1/players/{puuid}/competitiveupdates?startIndex=0&endIndex=1"
     headers = {
         'X-Riot-ClientPlatform': CLIENT_PLATFORM,
@@ -229,7 +225,6 @@ def get_player_mmr(region, shard, tokens, puuid):
         if response.status_code == 200:
             data = response.json()
             
-            # Extrahiere aus competitive updates
             if data.get("Matches") and len(data["Matches"]) > 0:
                 latest = data["Matches"][0]
                 current_rank = latest.get("TierAfterUpdate", 0)
@@ -347,6 +342,7 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
     CARD_HEIGHT = 280
     PADDING = 10
     HEADER_HEIGHT = 150
+    FOOTER_HEIGHT = 80  # Neue Footer-Höhe
     IMAGE_TOP_MARGIN = 15
     TEXT_AREA_HEIGHT = 100
 
@@ -375,24 +371,33 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
             ordered_skins.extend(skins)
 
     rows_needed = math.ceil(len(ordered_skins) / SKINS_PER_ROW) if ordered_skins else 0
-    total_height = PADDING + HEADER_HEIGHT + rows_needed * (CARD_HEIGHT + PADDING) + PADDING
+    total_height = PADDING + HEADER_HEIGHT + rows_needed * (CARD_HEIGHT + PADDING) + PADDING + FOOTER_HEIGHT
     canvas_width = SKINS_PER_ROW * (CARD_WIDTH + PADDING) + PADDING
     canvas = Image.new('RGB', (canvas_width, total_height), color=(30, 30, 30))
     draw = ImageDraw.Draw(canvas)
 
     try:
-        title_font = ImageFont.truetype("arial.ttf", 54)
+        try:
+            title_font = ImageFont.truetype("segoeui.ttf", 54)  # Segoe UI
+        except:
+            try:
+                title_font = ImageFont.truetype("calibri.ttf", 54)  # Calibri
+            except:
+                title_font = ImageFont.truetype("arial.ttf", 54)
+        
         center_font = ImageFont.truetype("arial.ttf", 40)
         wallet_font = ImageFont.truetype("arial.ttf", 32)
         name_font = ImageFont.truetype("arial.ttf", 30)
+        footer_font = ImageFont.truetype("arial.ttf", 30)
 
     except:
         title_font = ImageFont.load_default()
         center_font = ImageFont.load_default()
         wallet_font = ImageFont.load_default()
         name_font = ImageFont.load_default()
+        footer_font = ImageFont.load_default()
 
-    # left side
+    # Header - left side
     title_text = f"Weapon Skins: {total_skins} | [{''.join(c for c in player_region if c.isalpha()).upper()}] | [{rank_info['current_rank']}]"
     bbox = draw.textbbox((0, 0), title_text, font=title_font)
     text_height = bbox[3] - bbox[1]
@@ -400,29 +405,6 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
     text_y = PADDING + (HEADER_HEIGHT - text_height) // 3
     draw.text((text_x + 2, text_y + 2), title_text, fill=(0, 0, 0), font=title_font)
     draw.text((text_x, text_y), title_text, fill=(255, 255, 255), font=title_font)
-
-    # ignore used above
-    """ 
-    # Mitte: Region und Rank
-    region_text = f"[{''.join(c for c in player_region if c.isalpha()).upper()}]"
-    rank_text = f"[{rank_info['current_rank']}]" #  [{rank_info['current_rr']} RR]
-    
-    # Region
-    bbox = draw.textbbox((0, 0), region_text, font=center_font)
-    region_width = bbox[2] - bbox[0]
-    region_x = PADDING + 300
-    region_y = text_y + 10
-    draw.text((region_x + 2, region_y + 2), region_text, fill=(0, 0, 0), font=center_font)
-    draw.text((region_x, region_y), region_text, fill=(255, 255, 255), font=center_font)
-    
-    # Rank
-    bbox = draw.textbbox((0, 0), rank_text, font=center_font)
-    rank_width = bbox[2] - bbox[0]
-    rank_x = PADDING + 375
-    rank_y = region_y
-    draw.text((rank_x + 2, rank_y + 2), rank_text, fill=(0, 0, 0), font=center_font)
-    draw.text((rank_x, rank_y), rank_text, fill=(255, 215, 0), font=center_font)
-    """
 
     # Rechte Seite: Wallet Informationen
     wallet_text_lines = []
@@ -489,6 +471,25 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
             draw.text((text_x, current_y), line, fill=(255, 255, 255), font=name_font)
             current_y += measured_heights[i] + spacing
 
+    # Footer mit Timestamp
+    now = datetime.now()
+    month_names = {
+        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+        7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
+    }
+    timestamp_str = f"{now.day}.{month_names[now.month]}.{now.year} {now.strftime('%H:%M')}"
+    footer_text = f"intenzdev | {timestamp_str}"
+    
+    footer_y = total_height - FOOTER_HEIGHT + 20
+    bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
+    footer_width = bbox[2] - bbox[0]
+    footer_height = bbox[3] - bbox[1]
+    footer_x = (canvas_width - footer_width) // 2
+    
+    # Footer Text mit Schatten
+    draw.text((footer_x + 2, footer_y + 2), footer_text, fill=(0, 0, 0), font=footer_font)
+    draw.text((footer_x, footer_y), footer_text, fill=(150, 150, 150), font=footer_font)
+
     return canvas
 
 def main():
@@ -513,7 +514,6 @@ def main():
         log("Failed to retrieve player UUID", "ERROR")
         return
 
-
     region, shard = get_region_and_shard(session, port)
     client_version = get_client_version(session, port)
 
@@ -523,10 +523,8 @@ def main():
         'client_version': client_version
     }
 
-    # Hole Wallet Daten
     wallet = get_wallet(region, shard, tokens, player_uuid)
     rank_info = get_player_mmr(region, shard, tokens, player_uuid)
-
 
     skins = get_owned_skins(region, shard, tokens, player_uuid)
     log(f"{len(skins)} skins w/variants owned", "SUCCESS")
