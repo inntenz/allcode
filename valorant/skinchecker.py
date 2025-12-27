@@ -343,12 +343,12 @@ def wrap_text(draw, text, font, max_width, max_lines=2):
 def create_skin_grid(skins_data, wallet, rank_info, player_region):
     # HOCHAUFLÖSENDE EINSTELLUNGEN
     SKINS_PER_ROW = 8
-    CARD_WIDTH = 300
-    CARD_HEIGHT = 300
+    CARD_WIDTH = 400
+    CARD_HEIGHT = 280
     PADDING = 10
     HEADER_HEIGHT = 150
     IMAGE_TOP_MARGIN = 15
-    TEXT_AREA_HEIGHT = 80
+    TEXT_AREA_HEIGHT = 100
 
     total_skins = len(skins_data)
     sorted_skins = sorted(skins_data, key=lambda x: RARITY_INFO.get(x['rarity'], RARITY_INFO[None]).get('order', 999))
@@ -377,22 +377,23 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
     rows_needed = math.ceil(len(ordered_skins) / SKINS_PER_ROW) if ordered_skins else 0
     total_height = PADDING + HEADER_HEIGHT + rows_needed * (CARD_HEIGHT + PADDING) + PADDING
     canvas_width = SKINS_PER_ROW * (CARD_WIDTH + PADDING) + PADDING
-    canvas = Image.new('RGB', (canvas_width, total_height), color=(15, 18, 25))
+    canvas = Image.new('RGB', (canvas_width, total_height), color=(30, 30, 30))
     draw = ImageDraw.Draw(canvas)
 
     try:
         title_font = ImageFont.truetype("arial.ttf", 54)
-        center_font = ImageFont.truetype("arial.ttf", 36)
+        center_font = ImageFont.truetype("arial.ttf", 40)
         wallet_font = ImageFont.truetype("arial.ttf", 32)
-        name_font = ImageFont.truetype("arial.ttf", 24)
+        name_font = ImageFont.truetype("arial.ttf", 30)
+
     except:
         title_font = ImageFont.load_default()
         center_font = ImageFont.load_default()
         wallet_font = ImageFont.load_default()
         name_font = ImageFont.load_default()
 
-    # Linke Seite: "Skins: X"
-    title_text = f"Skins: {total_skins}"
+    # left side
+    title_text = f"Weapon Skins: {total_skins} | [{''.join(c for c in player_region if c.isalpha()).upper()}] | [{rank_info['current_rank']}]"
     bbox = draw.textbbox((0, 0), title_text, font=title_font)
     text_height = bbox[3] - bbox[1]
     text_x = PADDING
@@ -400,25 +401,28 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
     draw.text((text_x + 2, text_y + 2), title_text, fill=(0, 0, 0), font=title_font)
     draw.text((text_x, text_y), title_text, fill=(255, 255, 255), font=title_font)
 
+    # ignore used above
+    """ 
     # Mitte: Region und Rank
-    region_text = f"Region: {player_region.upper()}"
-    rank_text = f"{rank_info['current_rank']} ({rank_info['current_rr']} RR)"
+    region_text = f"[{''.join(c for c in player_region if c.isalpha()).upper()}]"
+    rank_text = f"[{rank_info['current_rank']}]" #  [{rank_info['current_rr']} RR]
     
     # Region
     bbox = draw.textbbox((0, 0), region_text, font=center_font)
     region_width = bbox[2] - bbox[0]
-    region_x = (canvas_width - region_width) // 2
-    region_y = PADDING + 25
+    region_x = PADDING + 300
+    region_y = text_y + 10
     draw.text((region_x + 2, region_y + 2), region_text, fill=(0, 0, 0), font=center_font)
-    draw.text((region_x, region_y), region_text, fill=(100, 200, 255), font=center_font)
+    draw.text((region_x, region_y), region_text, fill=(255, 255, 255), font=center_font)
     
     # Rank
     bbox = draw.textbbox((0, 0), rank_text, font=center_font)
     rank_width = bbox[2] - bbox[0]
-    rank_x = (canvas_width - rank_width) // 2
-    rank_y = region_y + 50
+    rank_x = PADDING + 375
+    rank_y = region_y
     draw.text((rank_x + 2, rank_y + 2), rank_text, fill=(0, 0, 0), font=center_font)
     draw.text((rank_x, rank_y), rank_text, fill=(255, 215, 0), font=center_font)
+    """
 
     # Rechte Seite: Wallet Informationen
     wallet_text_lines = []
@@ -429,7 +433,7 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
     if wallet.get("Kingdom Credits", 0) > 0 or "Kingdom Credits" in wallet:
         wallet_text_lines.append(f"KC: {wallet.get('Kingdom Credits', 0)}")
     
-    wallet_x = canvas_width - PADDING - 10
+    wallet_x = canvas_width - PADDING
     wallet_y = PADDING + 20
     for line in wallet_text_lines:
         bbox = draw.textbbox((0, 0), line, font=wallet_font)
@@ -467,7 +471,6 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
         name = extract_base_skin_name(skin['name'])
         max_text_width = CARD_WIDTH - 16
         lines = wrap_text(draw, name, name_font, max_text_width, max_lines=2)
-        draw.rectangle([x + 4, y + CARD_HEIGHT - TEXT_AREA_HEIGHT + 3, x + CARD_WIDTH - 4, y + CARD_HEIGHT - 4], fill=(10, 12, 18))
         total_text_height = 0
         measured_heights = []
         for line in lines:
