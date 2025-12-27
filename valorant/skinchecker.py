@@ -2,26 +2,25 @@ import requests
 import time
 import urllib3
 import re
-import os
 import math
 import json
+import os
+import base64
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
-import textwrap
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CLIENT_PLATFORM = "ew0KCSJwbGF0Zm9ybVR5cGUiOiAiUEMiLA0KCSJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLA0KCSJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwNCgkicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iDQp9"
 
-# Currency IDs
 CURRENCY_IDS = {
     "85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741": "VP",
     "e59aa87c-4cbf-517a-5983-6e81511be9b7": "Radianite",
     "85ca954a-41f2-ce94-9b45-8ca3dd39a00d": "Kingdom Credits"
 }
 
-# Rank Tiers
 RANK_NAMES = {
     0: "Unranked",
     3: "Iron 1", 4: "Iron 2", 5: "Iron 3",
@@ -36,221 +35,188 @@ RANK_NAMES = {
 }
 
 RARITY_INFO = {
-    "e046854e-406c-37f4-6607-19a9ba8426fc": {
-        "name": "Ultra",
-        "color": (255, 215, 0),
-        "order": 1
-    },
-    "411e4a55-4e59-7757-41f0-86a53f101bb5": {
-        "name": "Exclusive",
-        "color": (255, 152, 51),
-        "order": 2
-    },
-    "60bca009-4182-7998-dee7-b8a2558dc369": {
-        "name": "Premium",
-        "color": (207, 85, 168),
-        "order": 3
-    },
-    "0cebb8be-46d7-c12a-d306-e9907bfc5a25": {
-        "name": "Deluxe",
-        "color": (64, 224, 208),
-        "order": 4
-    },
-    "12683d76-48d7-84a3-4e09-6985794f0445": {
-        "name": "Deluxe",
-        "color": (64, 224, 208),
-        "order": 4
-    },
-    None: {
-        "name": "Deluxe",
-        "color": (64, 224, 208),
-        "order": 4
-    }
+    "e046854e-406c-37f4-6607-19a9ba8426fc": {"name": "Ultra", "color": (255, 215, 0), "order": 1},
+    "411e4a55-4e59-7757-41f0-86a53f101bb5": {"name": "Exclusive", "color": (255, 152, 51), "order": 2},
+    "60bca009-4182-7998-dee7-b8a2558dc369": {"name": "Premium", "color": (207, 85, 168), "order": 3},
+    "0cebb8be-46d7-c12a-d306-e9907bfc5a25": {"name": "Deluxe", "color": (64, 224, 208), "order": 4},
+    "12683d76-48d7-84a3-4e09-6985794f0445": {"name": "Deluxe", "color": (64, 224, 208), "order": 4},
+    None: {"name": "Deluxe", "color": (64, 224, 208), "order": 4}
 }
 
 def log(message, type="INFO"):
     timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    colors = {
-        "INFO": "\033[94m",
-        "SUCCESS": "\033[92m",
-        "WARNING": "\033[93m",
-        "ERROR": "\033[91m",
-        "DEBUG": "\033[95m"
-    }
+    colors = {"INFO": "\033[94m", "SUCCESS": "\033[92m", "WARNING": "\033[93m", "ERROR": "\033[91m", "DEBUG": "\033[95m"}
     reset = "\033[0m"
     print(f"[{timestamp}] {colors.get(type, '')}{message}{reset}")
 
-def get_lockfile_data():
-    try:
-        lockfile_path = os.path.join(os.getenv('LOCALAPPDATA'), r"Riot Games\Riot Client\Config\lockfile")
-        log(f"Reading lockfile from: {lockfile_path}", "DEBUG")
-        if not os.path.exists(lockfile_path):
-            log(f"Lockfile does not exist at {lockfile_path}", "ERROR")
-            return None
-        with open(lockfile_path, 'r') as f:
-            data = f.read().split(':')
-            return {'port': data[2], 'password': data[3]}
-    except Exception as e:
-        log(f"Failed to read lockfile: {e}", "ERROR")
-        import traceback
-        log(traceback.format_exc(), "ERROR")
+def get_lockfile_path():
+    """Find Riot Client lockfile"""
+    localappdata = os.getenv('LOCALAPPDATA')
+    lockfile_path = os.path.join(localappdata, 'Riot Games', 'Riot Client', 'Config', 'lockfile')
+    return lockfile_path
+
+def read_lockfile():
+    """Read lockfile and extract connection info"""
+    lockfile_path = get_lockfile_path()
+    
+    if not os.path.exists(lockfile_path):
         return None
-
-def create_local_session(lockfile):
-    session = requests.Session()
-    session.verify = False
-    session.auth = ('riot', lockfile['password'])
-    return session
-
-def get_entitlements_and_token(session, port):
-    try:
-        url = f"https://127.0.0.1:{port}/entitlements/v1/token"
-        response = session.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            return {'entitlements_token': data['token'], 'access_token': data['accessToken']}
-        else:
-            log(f"Token response: {response.text}", "ERROR")
-    except Exception as e:
-        log(f"Failed to retrieve tokens: {e}", "ERROR")
-        import traceback
-        log(traceback.format_exc(), "ERROR")
-    return None
-
-def get_client_version(session, port):
-    try:
-        url = f"https://127.0.0.1:{port}/product-session/v1/external-sessions"
-        response = session.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            for key, value in data.items():
-                if 'valorant' in key.lower():
-                    version = value.get('version', '')
-                    if version:
-                        return version
-    except Exception as e:
-        log(f"Failed to get client version: {e}", "WARNING")
-    return "release-11.11-shipping-123-4567890"
-
-def get_region_and_shard_from_log():
-    try:
-        log_path = os.path.join(os.getenv('LOCALAPPDATA'), r"VALORANT\Saved\Logs\ShooterGame.log")
-        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-            match = re.search(r'https://glz-(.+?)-1\.(.+?)\.a\.pvp\.net', content)
-            if match:
-                region = match.group(1)
-                shard = match.group(2)
-                return region, shard
-    except Exception as e:
-        log(f"Could not read ShooterGame.log: {e}", "WARNING")
-    return None, None
-
-def get_region_and_shard(session, port):
-    region, shard = get_region_and_shard_from_log()
-    if region and shard:
-        return region, shard
     
     try:
-        url = f"https://127.0.0.1:{port}/product-session/v1/external-sessions"
-        response = session.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            for key, value in data.items():
-                if 'valorant' in key.lower():
-                    launch_config = value.get('launchConfiguration', {})
-                    args = launch_config.get('arguments', [])
-                    for arg in args:
-                        if 'ares-cluster' in arg:
-                            region = arg.split('=')[1] if '=' in arg else 'eu'
-                            return region, region
+        with open(lockfile_path, 'r') as f:
+            data = f.read().split(':')
+            return {
+                'process': data[0],
+                'pid': data[1],
+                'port': data[2],
+                'password': data[3],
+                'protocol': data[4]
+            }
     except Exception as e:
-        log(f"Failed to get region/shard: {e}", "WARNING")
-    return 'eu', 'eu'
+        log(f"Error reading lockfile: {e}", "ERROR")
+        return None
 
-def get_player_data(session, port):
+def get_tokens_from_riot_client():
+    """Get authentication tokens from running Riot Client"""
+
+    
+    lockfile = read_lockfile()
+    if not lockfile:
+        log("❌ Riot Client not running or lockfile not found!", "ERROR")
+        log("💡 Please start Riot Client (Valorant doesn't need to be running)", "WARNING")
+        return None
+    
+    
     try:
-        url = f"https://127.0.0.1:{port}/chat/v1/session"
-        response = session.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            puuid = data.get("puuid")
-            game_name = data.get("game_name")
-            game_tag = data.get("game_tag")
-            region = data.get("region", "Unknown")
-
-            if game_name and game_tag:
-                log(f"CHECKING USER: {game_name}#{game_tag} | Region: {region}", "INFO")
-            elif game_name:
-                print(f"{game_name} | Region: {region}")
-            else:
-                print(f"Unknown Player | Region: {region}")
-            return puuid, region
+        # Create session with basic auth
+        session = requests.Session()
+        session.verify = False
+        
+        # Basic auth with riot:password
+        auth_string = f"riot:{lockfile['password']}"
+        auth_token = base64.b64encode(auth_string.encode()).decode()
+        
+        headers = {
+            'Authorization': f'Basic {auth_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get entitlements token from local client
+        url = f"https://127.0.0.1:{lockfile['port']}/entitlements/v1/token"
+        response = session.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            log(f"Failed to get tokens: {response.status_code}", "ERROR")
+            return None
+        
+        data = response.json()
+        
+        # Get user info
+        userinfo_url = f"https://127.0.0.1:{lockfile['port']}/chat/v1/session"
+        userinfo_response = session.get(userinfo_url, headers=headers)
+        
+        puuid = data.get('subject', '')
+        game_name = "Unknown"
+        game_tag = "Unknown"
+        
+        if userinfo_response.status_code == 200:
+            userinfo = userinfo_response.json()
+            if 'game_name' in userinfo:
+                game_name = userinfo['game_name']
+            if 'game_tag' in userinfo:
+                game_tag = userinfo['game_tag']
+        
+        return {
+            'access_token': data['accessToken'],
+            'entitlements_token': data['token'],
+            'puuid': puuid,
+            'game_name': game_name,
+            'tag_line': game_tag
+        }
+        
     except Exception as e:
-        log(f"Failed to retrieve player data: {e}", "ERROR")
-    return None, "Unknown"
+        log(f"Error getting tokens: {e}", "ERROR")
+        import traceback
+        log(traceback.format_exc(), "DEBUG")
+        return None
 
-def get_wallet(region, shard, tokens, puuid):
-    url = f"https://pd.{shard}.a.pvp.net/store/v1/wallet/{puuid}"
+def get_client_version():
+    try:
+        response = requests.get("https://valorant-api.com/v1/version")
+        data = response.json()
+        if data['status'] == 200:
+            return data['data']['riotClientVersion']
+    except:
+        pass
+    return "release-09.11-shipping-26-3161450"
+
+def get_region_from_token(access_token):
+    try:
+        parts = access_token.split('.')
+        if len(parts) >= 2:
+            payload = parts[1]
+            payload += '=' * (4 - len(payload) % 4)
+            decoded = base64.b64decode(payload)
+            token_data = json.loads(decoded)
+            
+            if 'pp' in token_data and 'region' in token_data['pp']:
+                return token_data['pp']['region'].lower()
+    except:
+        pass
+    return 'eu'
+
+def get_wallet(region, tokens, puuid, client_version):
+    url = f"https://pd.{region}.a.pvp.net/store/v1/wallet/{puuid}"
     headers = {
         'X-Riot-ClientPlatform': CLIENT_PLATFORM,
-        'X-Riot-ClientVersion': tokens['client_version'],
+        'X-Riot-ClientVersion': client_version,
         'X-Riot-Entitlements-JWT': tokens['entitlements_token'],
         'Authorization': f"Bearer {tokens['access_token']}"
     }
     try:
         response = requests.get(url, headers=headers, verify=False)
         data = response.json()
-        balances = data.get("Balances", {})
-        wallet = {}
-        for currency_id, amount in balances.items():
-            currency_name = CURRENCY_IDS.get(currency_id, "Unknown")
-            wallet[currency_name] = amount
+        wallet = {
+            "VP": 0,
+            "Radianite": 0,
+            "Kingdom Credits": 0
+        }
+        for currency_id, amount in data.get("Balances", {}).items():
+            currency_name = CURRENCY_IDS.get(currency_id)
+            if currency_name in wallet:
+                wallet[currency_name] = amount
         return wallet
     except Exception as e:
         log(f"Failed to retrieve wallet: {e}", "ERROR")
-        return {}
+        return {"VP": 0, "Radianite": 0, "Kingdom Credits": 0}
 
-def get_player_mmr(region, shard, tokens, puuid):
-    url = f"https://pd.{shard}.a.pvp.net/mmr/v1/players/{puuid}/competitiveupdates?startIndex=0&endIndex=1"
+def get_player_mmr(region, tokens, puuid, client_version):
+    url = f"https://pd.{region}.a.pvp.net/mmr/v1/players/{puuid}/competitiveupdates?startIndex=0&endIndex=1"
     headers = {
         'X-Riot-ClientPlatform': CLIENT_PLATFORM,
-        'X-Riot-ClientVersion': tokens['client_version'],
+        'X-Riot-ClientVersion': client_version,
         'X-Riot-Entitlements-JWT': tokens['entitlements_token'],
         'Authorization': f"Bearer {tokens['access_token']}"
     }
     try:
         response = requests.get(url, headers=headers, verify=False)
-        
         if response.status_code == 200:
             data = response.json()
-            
             if data.get("Matches") and len(data["Matches"]) > 0:
                 latest = data["Matches"][0]
-                current_rank = latest.get("TierAfterUpdate", 0)
-                current_rr = latest.get("RankedRatingAfterUpdate", 0)
-                
                 return {
-                    "current_rank": RANK_NAMES.get(current_rank, f"Unknown ({current_rank})"),
-                    "current_rr": current_rr
+                    "current_rank": RANK_NAMES.get(latest.get("TierAfterUpdate", 0), "Unknown"),
+                    "current_rr": latest.get("RankedRatingAfterUpdate", 0)
                 }
-        
-        return {
-            "current_rank": "Unranked",
-            "current_rr": 0
-        }
-    except Exception as e:
-        log(f"Failed to retrieve MMR: {e}", "ERROR")
-        return {
-            "current_rank": "Unknown",
-            "current_rr": 0
-        }
+        return {"current_rank": "Unranked", "current_rr": 0}
+    except:
+        return {"current_rank": "Unknown", "current_rr": 0}
 
-def get_owned_skins(region, shard, tokens, puuid):
-    url = f"https://pd.{shard}.a.pvp.net/store/v1/entitlements/{puuid}"
+def get_owned_skins(region, tokens, puuid, client_version):
+    url = f"https://pd.{region}.a.pvp.net/store/v1/entitlements/{puuid}"
     headers = {
         'X-Riot-ClientPlatform': CLIENT_PLATFORM,
-        'X-Riot-ClientVersion': tokens['client_version'],
+        'X-Riot-ClientVersion': client_version,
         'X-Riot-Entitlements-JWT': tokens['entitlements_token'],
         'Authorization': f"Bearer {tokens['access_token']}"
     }
@@ -274,54 +240,50 @@ def get_skin_mapping():
         for skin in data['data']:
             content_tier = skin.get('contentTierUuid')
             base_name = skin['displayName']
-            mapping[skin['uuid']] = {
-                'name': base_name,
-                'icon': skin['displayIcon'],
-                'rarity': content_tier,
-                'base_name': base_name
-            }
+            mapping[skin['uuid']] = {'name': base_name, 'icon': skin['displayIcon'], 'rarity': content_tier, 'base_name': base_name}
             for chroma in skin.get('chromas', []):
-                mapping[chroma['uuid']] = {
-                    'name': chroma['displayName'],
-                    'icon': chroma.get('displayIcon') or skin['displayIcon'],
-                    'rarity': content_tier,
-                    'base_name': base_name
-                }
+                mapping[chroma['uuid']] = {'name': chroma['displayName'], 'icon': chroma.get('displayIcon') or skin['displayIcon'], 'rarity': content_tier, 'base_name': base_name}
             for level in skin.get('levels', []):
-                mapping[level['uuid']] = {
-                    'name': level['displayName'],
-                    'icon': level.get('displayIcon') or skin['displayIcon'],
-                    'rarity': content_tier,
-                    'base_name': base_name
-                }
+                mapping[level['uuid']] = {'name': level['displayName'], 'icon': level.get('displayIcon') or skin['displayIcon'], 'rarity': content_tier, 'base_name': base_name}
         return mapping
     except Exception as e:
-        log(f"Failed to fetch official skins: {e}", "ERROR")
+        log(f"Failed to fetch skins: {e}", "ERROR")
         return {}
 
 def extract_base_skin_name(name):
-    clean_name = re.sub(r'\s+Level\s+\d+', '', name, flags=re.IGNORECASE)
-    clean_name = re.sub(r'\s+Variant\s+\d+.*', '', clean_name, flags=re.IGNORECASE)
-    clean_name = re.sub(r'\s+\(.*?\)', '', clean_name)
-    return clean_name.strip()
+    clean = re.sub(r'\s+Level\s+\d+', '', name, flags=re.IGNORECASE)
+    clean = re.sub(r'\s+Variant\s+\d+.*', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\s+\(.*?\)', '', clean)
+    return clean.strip()
 
 def download_image(url):
     try:
         response = requests.get(url, timeout=10)
-        img = Image.open(BytesIO(response.content))
-        return img.convert("RGBA")
-    except Exception:
+        return Image.open(BytesIO(response.content)).convert("RGBA")
+    except:
         return None
+
+def download_skin_image(skin_info):
+    """Download a single skin image - for multithreading"""
+    base = skin_info.get('base_name', skin_info['name'])
+    icon_url = skin_info['icon']
+    rarity = skin_info.get('rarity')
+    
+    if not icon_url:
+        return None
+    
+    img = download_image(icon_url)
+    if img:
+        return {'name': base, 'image': img, 'rarity': rarity}
+    return None
 
 def wrap_text(draw, text, font, max_width, max_lines=2):
     words = text.split()
-    lines = []
-    current = ""
+    lines, current = [], ""
     for w in words:
         candidate = (current + " " + w).strip()
         bbox = draw.textbbox((0, 0), candidate, font=font)
-        wlen = bbox[2] - bbox[0]
-        if wlen <= max_width:
+        if bbox[2] - bbox[0] <= max_width:
             current = candidate
         else:
             if current:
@@ -331,237 +293,152 @@ def wrap_text(draw, text, font, max_width, max_lines=2):
             break
     if current and len(lines) < max_lines:
         lines.append(current)
-    if len(lines) > max_lines:
-        lines = lines[:max_lines]
-    return lines
+    return lines[:max_lines]
 
-def create_skin_grid(skins_data, wallet, rank_info, player_region):
-    # HOCHAUFLÖSENDE EINSTELLUNGEN
-    SKINS_PER_ROW = 8
-    CARD_WIDTH = 400
-    CARD_HEIGHT = 280
-    PADDING = 10
-    HEADER_HEIGHT = 150
-    FOOTER_HEIGHT = 80  # Neue Footer-Höhe
-    IMAGE_TOP_MARGIN = 15
-    TEXT_AREA_HEIGHT = 100
+def create_skin_grid(skins_data, wallet, rank_info, player_region, game_name, game_tag):
+    SKINS_PER_ROW, CARD_WIDTH, CARD_HEIGHT, PADDING = 8, 400, 280, 10
+    HEADER_HEIGHT, FOOTER_HEIGHT, IMAGE_TOP_MARGIN, TEXT_AREA_HEIGHT = 150, 80, 15, 100
 
-    total_skins = len(skins_data)
-    sorted_skins = sorted(skins_data, key=lambda x: RARITY_INFO.get(x['rarity'], RARITY_INFO[None]).get('order', 999))
-    grouped_skins = {}
+    sorted_skins = sorted(skins_data, key=lambda x: RARITY_INFO.get(x['rarity'], RARITY_INFO[None])['order'])
+    grouped = {}
     for skin in sorted_skins:
-        rarity = skin['rarity']
-        rarity_info = RARITY_INFO.get(rarity, RARITY_INFO[None])
-        group_key = rarity if rarity_info['name'] != "Deluxe" else "turquoise"
-        grouped_skins.setdefault(group_key, []).append(skin)
+        rinfo = RARITY_INFO.get(skin['rarity'], RARITY_INFO[None])
+        key = skin['rarity'] if rinfo['name'] != "Deluxe" else "turquoise"
+        grouped.setdefault(key, []).append(skin)
 
-    group_order = [
-        ("e046854e-406c-37f4-6607-19a9ba8426fc", (255, 215, 0)),
-        ("411e4a55-4e59-7757-41f0-86a53f101bb5", (255, 152, 51)),
-        ("60bca009-4182-7998-dee7-b8a2558dc369", (207, 85, 168)),
-        ("turquoise", (64, 224, 208))
-    ]
+    ordered = []
+    for key, _ in [("e046854e-406c-37f4-6607-19a9ba8426fc", None), ("411e4a55-4e59-7757-41f0-86a53f101bb5", None), ("60bca009-4182-7998-dee7-b8a2558dc369", None), ("turquoise", None)]:
+        ordered.extend(grouped.get(key, []))
 
-    ordered_skins = []
-    for key, _ in group_order:
-        if key in grouped_skins:
-            ordered_skins.extend(grouped_skins[key])
-    for key, skins in grouped_skins.items():
-        if key not in [k for k, _ in group_order]:
-            ordered_skins.extend(skins)
-
-    rows_needed = math.ceil(len(ordered_skins) / SKINS_PER_ROW) if ordered_skins else 0
-    total_height = PADDING + HEADER_HEIGHT + rows_needed * (CARD_HEIGHT + PADDING) + PADDING + FOOTER_HEIGHT
+    rows = math.ceil(len(ordered) / SKINS_PER_ROW) if ordered else 0
     canvas_width = SKINS_PER_ROW * (CARD_WIDTH + PADDING) + PADDING
-    canvas = Image.new('RGB', (canvas_width, total_height), color=(30, 30, 30))
+    canvas_height = PADDING + HEADER_HEIGHT + rows * (CARD_HEIGHT + PADDING) + PADDING + FOOTER_HEIGHT
+    canvas = Image.new('RGB', (canvas_width, canvas_height), (30, 30, 30))
     draw = ImageDraw.Draw(canvas)
 
     try:
-        try:
-            title_font = ImageFont.truetype("segoeui.ttf", 54)  # Segoe UI
-        except:
-            try:
-                title_font = ImageFont.truetype("calibri.ttf", 54)  # Calibri
-            except:
-                title_font = ImageFont.truetype("arial.ttf", 54)
-        
-        center_font = ImageFont.truetype("arial.ttf", 40)
+        try: title_font = ImageFont.truetype("segoeui.ttf", 54)
+        except: title_font = ImageFont.truetype("arial.ttf", 54)
         wallet_font = ImageFont.truetype("arial.ttf", 32)
         name_font = ImageFont.truetype("arial.ttf", 30)
         footer_font = ImageFont.truetype("arial.ttf", 30)
-
     except:
-        title_font = ImageFont.load_default()
-        center_font = ImageFont.load_default()
-        wallet_font = ImageFont.load_default()
-        name_font = ImageFont.load_default()
-        footer_font = ImageFont.load_default()
+        title_font = wallet_font = name_font = footer_font = ImageFont.load_default()
 
-    # Header - left side
-    title_text = f"Weapon Skins: {total_skins} | [{''.join(c for c in player_region if c.isalpha()).upper()}] | [{rank_info['current_rank']}]"
-    bbox = draw.textbbox((0, 0), title_text, font=title_font)
-    text_height = bbox[3] - bbox[1]
-    text_x = PADDING
-    text_y = PADDING + (HEADER_HEIGHT - text_height) // 3
-    draw.text((text_x + 2, text_y + 2), title_text, fill=(0, 0, 0), font=title_font)
-    draw.text((text_x, text_y), title_text, fill=(255, 255, 255), font=title_font)
+    # Header
+    title = f"Weapon skins: {len(skins_data)} | [{player_region.upper()}] | [{rank_info['current_rank']}]"
+    bbox = draw.textbbox((0, 0), title, font=title_font)
+    draw.text((PADDING + 2, PADDING + (HEADER_HEIGHT - (bbox[3] - bbox[1])) // 3 + 2), title, fill=(0, 0, 0), font=title_font)
+    draw.text((PADDING, PADDING + (HEADER_HEIGHT - (bbox[3] - bbox[1])) // 3), title, fill=(255, 255, 255), font=title_font)
 
-    # Rechte Seite: Wallet Informationen
-    wallet_text_lines = []
-    if wallet.get("VP", 0) > 0 or "VP" in wallet:
-        wallet_text_lines.append(f"VP: {wallet.get('VP', 0)}")
-    if wallet.get("Radianite", 0) > 0 or "Radianite" in wallet:
-        wallet_text_lines.append(f"Radianite: {wallet.get('Radianite', 0)}")
-    if wallet.get("Kingdom Credits", 0) > 0 or "Kingdom Credits" in wallet:
-        wallet_text_lines.append(f"KC: {wallet.get('Kingdom Credits', 0)}")
+    # Wallet - nur VP, Radianite und KC
+    wallet_lines = [
+        f"VP: {wallet['VP']}",
+        f"Radianite: {wallet['Radianite']}",
+        f"KC: {wallet['Kingdom Credits']}"
+    ]
     
-    wallet_x = canvas_width - PADDING
-    wallet_y = PADDING + 20
-    for line in wallet_text_lines:
+    wx, wy = canvas_width - PADDING, PADDING + 20
+    for line in wallet_lines:
         bbox = draw.textbbox((0, 0), line, font=wallet_font)
-        line_width = bbox[2] - bbox[0]
-        line_x = wallet_x - line_width
-        draw.text((line_x + 2, wallet_y + 2), line, fill=(0, 0, 0), font=wallet_font)
-        draw.text((line_x, wallet_y), line, fill=(255, 215, 0), font=wallet_font)
-        wallet_y += bbox[3] - bbox[1] + 8
+        lx = wx - (bbox[2] - bbox[0])
+        draw.text((lx + 2, wy + 2), line, fill=(0, 0, 0), font=wallet_font)
+        draw.text((lx, wy), line, fill=(255, 215, 0), font=wallet_font)
+        wy += (bbox[3] - bbox[1]) + 8
 
-    # Skin Cards
-    for idx, skin in enumerate(ordered_skins):
-        row = idx // SKINS_PER_ROW
-        col = idx % SKINS_PER_ROW
-        x = PADDING + col * (CARD_WIDTH + PADDING)
-        y = PADDING + HEADER_HEIGHT + row * (CARD_HEIGHT + PADDING)
-
-        rarity = skin.get('rarity')
-        rarity_info = RARITY_INFO.get(rarity, RARITY_INFO[None])
-        group_color = rarity_info['color'] if rarity_info and 'color' in rarity_info else (64, 224, 208)
-        card_color = tuple(min(255, int(c * 0.2)) for c in group_color)
-        draw.rectangle([x, y, x + CARD_WIDTH, y + CARD_HEIGHT], fill=card_color, outline=group_color, width=4)
-
-        image_area_top = y + IMAGE_TOP_MARGIN
-        image_area_bottom = y + CARD_HEIGHT - TEXT_AREA_HEIGHT - 10
-        available_h = max(1, image_area_bottom - image_area_top)
-        available_w = CARD_WIDTH - 20
+    # Cards
+    for idx, skin in enumerate(ordered):
+        row, col = idx // SKINS_PER_ROW, idx % SKINS_PER_ROW
+        x, y = PADDING + col * (CARD_WIDTH + PADDING), PADDING + HEADER_HEIGHT + row * (CARD_HEIGHT + PADDING)
+        rinfo = RARITY_INFO.get(skin['rarity'], RARITY_INFO[None])
+        color = rinfo['color']
+        draw.rectangle([x, y, x + CARD_WIDTH, y + CARD_HEIGHT], fill=tuple(int(c * 0.2) for c in color), outline=color, width=4)
 
         if skin['image']:
             img = skin['image'].copy()
-            img.thumbnail((available_w, available_h), Image.Resampling.LANCZOS)
-            img_x = x + (CARD_WIDTH - img.width) // 2
-            img_y = image_area_top + (available_h - img.height) // 2
-            canvas.paste(img, (img_x, img_y), img if img.mode == 'RGBA' else None)
+            img.thumbnail((CARD_WIDTH - 20, CARD_HEIGHT - TEXT_AREA_HEIGHT - 10 - IMAGE_TOP_MARGIN), Image.Resampling.LANCZOS)
+            canvas.paste(img, (x + (CARD_WIDTH - img.width) // 2, y + IMAGE_TOP_MARGIN + ((CARD_HEIGHT - TEXT_AREA_HEIGHT - 10 - IMAGE_TOP_MARGIN) - img.height) // 2), img)
 
-        name = extract_base_skin_name(skin['name'])
-        max_text_width = CARD_WIDTH - 16
-        lines = wrap_text(draw, name, name_font, max_text_width, max_lines=2)
-        total_text_height = 0
-        measured_heights = []
+        lines = wrap_text(draw, extract_base_skin_name(skin['name']), name_font, CARD_WIDTH - 16)
+        cy = y + CARD_HEIGHT - TEXT_AREA_HEIGHT + 8
         for line in lines:
             bbox = draw.textbbox((0, 0), line, font=name_font)
-            h = bbox[3] - bbox[1]
-            measured_heights.append(h)
-            total_text_height += h
-        spacing = 6 if len(lines) > 1 else 0
-        total_text_height += spacing * (len(lines) - 1)
-        current_y = y + CARD_HEIGHT - TEXT_AREA_HEIGHT + 8 + ((TEXT_AREA_HEIGHT - 16) - total_text_height) // 2
-        for i, line in enumerate(lines):
-            bbox = draw.textbbox((0, 0), line, font=name_font)
-            w = bbox[2] - bbox[0]
-            text_x = x + (CARD_WIDTH - w) // 2
-            draw.text((text_x + 1, current_y + 1), line, fill=(0, 0, 0), font=name_font)
-            draw.text((text_x, current_y), line, fill=(255, 255, 255), font=name_font)
-            current_y += measured_heights[i] + spacing
+            tx = x + (CARD_WIDTH - (bbox[2] - bbox[0])) // 2
+            draw.text((tx + 1, cy + 1), line, fill=(0, 0, 0), font=name_font)
+            draw.text((tx, cy), line, fill=(255, 255, 255), font=name_font)
+            cy += (bbox[3] - bbox[1]) + 6
 
-    # Footer mit Timestamp
+    # Footer
     now = datetime.now()
-    month_names = {
-        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
-        7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
-    }
-    timestamp_str = f"{now.day}.{month_names[now.month]}.{now.year} {now.strftime('%H:%M')}"
-    footer_text = f"{timestamp_str}"
-    
-    footer_y = total_height - FOOTER_HEIGHT + 20
-    bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
-    footer_width = bbox[2] - bbox[0]
-    footer_height = bbox[3] - bbox[1]
-    footer_x = (canvas_width - footer_width) // 2
-    
-    # Footer Text mit Schatten
-    draw.text((footer_x + 2, footer_y + 2), footer_text, fill=(0, 0, 0), font=footer_font)
-    draw.text((footer_x, footer_y), footer_text, fill=(150, 150, 150), font=footer_font)
+    months = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}
+    ts = f"{now.day}.{months[now.month]}.{now.year} {now.strftime('%H:%M')}"
+    bbox = draw.textbbox((0, 0), ts, font=footer_font)
+    fx = (canvas_width - (bbox[2] - bbox[0])) // 2
+    fy = canvas_height - FOOTER_HEIGHT + 20
+    draw.text((fx + 2, fy + 2), ts, fill=(0, 0, 0), font=footer_font)
+    draw.text((fx, fy), ts, fill=(150, 150, 150), font=footer_font)
 
     return canvas
 
 def main():
-    log("Starting Valorant Skins Checker", "INFO")
-    lockfile = get_lockfile_data()
-    if not lockfile:
-        log("Make sure Valorant AND Riot Client are running!", "ERROR")
-        log("The Riot Client creates the lockfile, not just Valorant.", "WARNING")
-        input("Press Enter to exit...")
-        return
-
-    port = lockfile['port']
-    session = create_local_session(lockfile)
-    tokens_data = get_entitlements_and_token(session, port)
-    if not tokens_data:
-        log("Failed to retrieve tokens - is Valorant fully loaded?", "ERROR")
-        input("Press Enter to exit...")
-        return
-
-    player_uuid, player_region = get_player_data(session, port)
-    if not player_uuid:
-        log("Failed to retrieve player UUID", "ERROR")
-        return
-
-    region, shard = get_region_and_shard(session, port)
-    client_version = get_client_version(session, port)
-
-    tokens = {
-        'entitlements_token': tokens_data['entitlements_token'],
-        'access_token': tokens_data['access_token'],
-        'client_version': client_version
-    }
-
-    wallet = get_wallet(region, shard, tokens, player_uuid)
-    rank_info = get_player_mmr(region, shard, tokens, player_uuid)
-
-    skins = get_owned_skins(region, shard, tokens, player_uuid)
-    log(f"{len(skins)} skins w/variants owned", "SUCCESS")
-
-    skin_mapping = get_skin_mapping()
-
-    skins_data = []
-    seen_base_names = set()
-
-    log("Downloading skins", "INFO")
-    for skin in skins:
-        info = skin_mapping.get(skin['ItemID'])
-        if info:
-            base_name = info.get('base_name', info['name'])
-            if base_name in seen_base_names:
-                continue
-            seen_base_names.add(base_name)
-            img = None
-            if info['icon']:
-                img = download_image(info['icon'])
-                if img:
-                    time.sleep(0.05)
-            skins_data.append({
-                'name': base_name,
-                'image': img,
-                'rarity': info.get('rarity')
-            })
-
-    log(f"Creating Image", "SUCCESS")
-    canvas = create_skin_grid(skins_data, wallet, rank_info, player_region)
-    output_path = "skins.png"
-    canvas.save(output_path, quality=100, optimize=False)
-    log(f"Saved to {output_path}", "SUCCESS")
+    
     try:
-        canvas.show()
-    except:
-        log("Image saved but couldn't open viewer", "WARNING")
+        auth = get_tokens_from_riot_client()
+        
+        if not auth:
+            log("❌ Could not get tokens from Riot Client!", "ERROR")
+            log("💡 Make sure Riot Client is running and you're logged in", "WARNING")
+            input("\nPress Enter to exit...")
+            return
+        
+        log(f"Logged in as: {auth['game_name']}#{auth['tag_line']}", "SUCCESS")
+        
+        client_version = get_client_version()
+        region = get_region_from_token(auth['access_token'])
+        
+        wallet = get_wallet(region, auth, auth['puuid'], client_version)
+        rank_info = get_player_mmr(region, auth, auth['puuid'], client_version)
+        
+        skins = get_owned_skins(region, auth, auth['puuid'], client_version)
+        
+        skin_mapping = get_skin_mapping()
+        
+        # Prepare unique skins for download
+        unique_skins = {}
+        for skin in skins:
+            info = skin_mapping.get(skin['ItemID'])
+            if info:
+                base = info.get('base_name', info['name'])
+                if base not in unique_skins:
+                    unique_skins[base] = info
+        
+        log(f"Downloading {len(unique_skins)} skin images", "INFO")
+        
+        skins_data = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(download_skin_image, info): name for name, info in unique_skins.items()}
+            
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                result = future.result()
+                if result:
+                    skins_data.append(result)
+                
+                # Progress indicator
+                
+        
+        log("Creating image...", "SUCCESS")
+        canvas = create_skin_grid(skins_data, wallet, rank_info, region, auth['game_name'], auth['tag_line'])
+        canvas.save("skins.png", quality=100, optimize=False)
+        log("✅ Saved to skins.png", "SUCCESS")
+        try: canvas.show()
+        except: log("Image saved but couldn't open viewer", "WARNING")
+            
+    except Exception as e:
+        log(f"Error: {e}", "ERROR")
+        import traceback
+        log(traceback.format_exc(), "ERROR")
 
 if __name__ == "__main__":
     main()
