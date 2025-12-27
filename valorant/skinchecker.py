@@ -35,12 +35,12 @@ RANK_NAMES = {
 }
 
 RARITY_INFO = {
-    "e046854e-406c-37f4-6607-19a9ba8426fc": {"name": "Ultra", "color": (255, 215, 0), "order": 1},
-    "411e4a55-4e59-7757-41f0-86a53f101bb5": {"name": "Exclusive", "color": (255, 152, 51), "order": 2},
-    "60bca009-4182-7998-dee7-b8a2558dc369": {"name": "Premium", "color": (207, 85, 168), "order": 3},
-    "0cebb8be-46d7-c12a-d306-e9907bfc5a25": {"name": "Deluxe", "color": (64, 224, 208), "order": 4},
-    "12683d76-48d7-84a3-4e09-6985794f0445": {"name": "Deluxe", "color": (64, 224, 208), "order": 4},
-    None: {"name": "Deluxe", "color": (64, 224, 208), "order": 4}
+    "411e4a55-4e59-7757-41f0-86a53f101bb5": {"name": "Exclusive", "color": (180, 150, 80), "order": 1},
+    "e046854e-406c-37f4-6607-19a9ba8426fc": {"name": "Ultra", "color": (190, 110, 80), "order": 2},
+    "60bca009-4182-7998-dee7-b8a2558dc369": {"name": "Premium", "color": (180, 100, 130), "order": 3},
+    "0cebb8be-46d7-c12a-d306-e9907bfc5a25": {"name": "Deluxe", "color": (60, 130, 120), "order": 4},
+    "12683d76-48d7-84a3-4e09-6985794f0445": {"name": "Deluxe", "color": (60, 130, 120), "order": 4},
+    None: {"name": "Deluxe", "color": (60, 130, 120), "order": 4}
 }
 
 def log(message, type="INFO"):
@@ -317,10 +317,10 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region, game_name, ga
     draw = ImageDraw.Draw(canvas)
 
     try:
-        try: title_font = ImageFont.truetype("segoeui.ttf", 54)
-        except: title_font = ImageFont.truetype("arial.ttf", 54)
-        wallet_font = ImageFont.truetype("arial.ttf", 32)
-        name_font = ImageFont.truetype("arial.ttf", 30)
+        try: title_font = ImageFont.truetype("arialbd.ttf", 54)
+        except: title_font = ImageFont.truetype("arialbd.ttf", 54)
+        wallet_font = ImageFont.truetype("arialbd.ttf", 32)
+        name_font = ImageFont.truetype("arialbd.ttf", 34)
         footer_font = ImageFont.truetype("arial.ttf", 30)
     except:
         title_font = wallet_font = name_font = footer_font = ImageFont.load_default()
@@ -352,7 +352,8 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region, game_name, ga
         x, y = PADDING + col * (CARD_WIDTH + PADDING), PADDING + HEADER_HEIGHT + row * (CARD_HEIGHT + PADDING)
         rinfo = RARITY_INFO.get(skin['rarity'], RARITY_INFO[None])
         color = rinfo['color']
-        draw.rectangle([x, y, x + CARD_WIDTH, y + CARD_HEIGHT], fill=tuple(int(c * 0.2) for c in color), outline=color, width=4)
+
+        draw.rectangle([x, y, x + CARD_WIDTH, y + CARD_HEIGHT], fill=color)
 
         if skin['image']:
             img = skin['image'].copy()
