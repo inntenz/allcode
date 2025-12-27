@@ -478,7 +478,7 @@ def create_skin_grid(skins_data, wallet, rank_info, player_region):
         7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
     }
     timestamp_str = f"{now.day}.{month_names[now.month]}.{now.year} {now.strftime('%H:%M')}"
-    footer_text = f"intenzdev | {timestamp_str}"
+    footer_text = f"{timestamp_str}"
     
     footer_y = total_height - FOOTER_HEIGHT + 20
     bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
